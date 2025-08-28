@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能视频下载器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 智能视频下载器</h1>
+            <p>自动解析视频链接并下载</p>
+        </header>
+
+        <main>
+            <div class="input-section">
+                <div class="tab-switcher">
+                    <button class="tab-btn active" data-tab="auto">自动解析</button>
+                    <button class="tab-btn" data-tab="manual">手动输入</button>
+                </div>
+
+                <!-- 自动解析模式 -->
+                <div id="autoTab" class="tab-content active">
+                    <div class="form-group">
+                        <label for="pageUrl">视频页面链接:</label>
+                        <textarea id="pageUrl" placeholder="请输入视频页面的完整链接...&#10;例如: https://example.com/video/123"></textarea>
+                    </div>
+                    
+                    <button id="parseBtn" class="parse-btn">
+                        <span class="btn-text">🔍 自动解析视频</span>
+                        <span class="loading-spinner" style="display: none;">⏳</span>
+                    </button>
+
+                    <div id="videoResults" class="video-results" style="display: none;">
+                        <h3>找到的视频链接:</h3>
+                        <div class="video-list"></div>
+                    </div>
+                </div>
+
+                <!-- 手动输入模式 -->
+                <div id="manualTab" class="tab-content">
+                    <div class="form-group">
+                        <label for="manualUrl">视频下载链接:</label>
+                        <textarea id="manualUrl" placeholder="请粘贴视频的直接下载链接..."></textarea>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="fileName">文件名 (可选):</label>
+                    <input type="text" id="fileName" placeholder="自定义文件名">
+                </div>
+
+                <button id="downloadBtn" class="download-btn" style="display: none;">
+                    <span class="btn-text">📥 开始下载</span>
+                    <span class="loading-spinner" style="display: none;">⏳</span>
+                </button>
+            </div>
+
+            <div class="status-section">
+                <div id="statusMessage" class="status-message"></div>
+                <div id="progressBar" class="progress-bar" style="display: none;">
+                    <div class="progress-fill"></div>
+                    <span class="progress-text">0%</span>
+                </div>
+            </div>
+
+            <div class="tips-section">
+                <h3>💡 使用说明</h3>
+                <ul>
+                    <li>自动解析：输入视频页面链接，自动提取下载地址</li>
+                    <li>手动输入：直接输入视频下载链接</li>
+                    <li>支持主流视频网站解析</li>
+                    <li>建议在WiFi环境下使用</li>
+                </ul>
+            </div>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

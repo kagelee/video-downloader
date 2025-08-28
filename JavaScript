@@ -1,0 +1,493 @@
+class SmartVideoDownloader {
+    constructor() {
+        this.selectedVideoUrl = '';
+        this.init();
+    }
+
+    init() {
+        this.initElements();
+        this.bindEvents();
+    }
+
+    initElements() {
+        // Tab elements
+        this.tabBtns = document.querySelectorAll('.tab-btn');
+        this.tabContents = document.querySelectorAll('.tab-content');
+        
+        // Auto parse elements
+        this.parseBtn = document.getElementById('parseBtn');
+        this.pageUrl = document.getElementById('pageUrl');
+        this.videoResults = document.getElementById('videoResults');
+        this.videoList = document.querySelector('.video-list');
+        
+        // Manual input elements
+        this.manualUrl = document.getElementById('manualUrl');
+        
+        // Common elements
+        this.downloadBtn = document.getElementById('downloadBtn');
+        this.fileName = document.getElementById('fileName');
+        this.statusMessage = document.getElementById('statusMessage');
+        this.progressBar = document.getElementById('progressBar');
+        this.progressFill = document.querySelector('.progress-fill');
+        this.progressText = document.querySelector('.progress-text');
+    }
+
+    bindEvents() {
+        // Tab switching
+        this.tabBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => this.switchTab(e.target.dataset.tab));
+        });
+
+        // Parse button
+        this.parseBtn.addEventListener('click', () => this.parseVideoPage());
+
+        // Download button
+        this.downloadBtn.addEventListener('click', () => this.handleDownload());
+
+        // URL validation
+        this.pageUrl.addEventListener('input', () => this.validatePageUrl());
+        this.manualUrl.addEventListener('input', () => this.validateManualUrl());
+    }
+
+    switchTab(tabName) {
+        // Update tab buttons
+        this.tabBtns.forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+
+        // Update tab contents
+        this.tabContents.forEach(content => {
+            content.classList.toggle('active', content.id === `${tabName}Tab`);
+        });
+
+        // Reset states
+        this.downloadBtn.style.display = 'none';
+        this.videoResults.style.display = 'none';
+        this.selectedVideoUrl = '';
+    }
+
+    validatePageUrl() {
+        const url = this.pageUrl.value.trim();
+        if (url) {
+            try {
+                new URL(url);
+                this.showStatus('页面链接格式正确', 'success');
+            } catch {
+                this.showStatus('请输入有效的页面链接', 'error');
+            }
+        }
+    }
+
+    validateManualUrl() {
+        const url = this.manualUrl.value.trim();
+        if (url) {
+            this.selectedVideoUrl = url;
+            this.downloadBtn.style.display = 'block';
+            try {
+                new URL(url);
+                this.showStatus('视频链接格式正确', 'success');
+            } catch {
+                this.showStatus('请输入有效的视频链接', 'error');
+            }
+        } else {
+            this.downloadBtn.style.display = 'none';
+        }
+    }
+
+    async parseVideoPage() {
+        const url = this.pageUrl.value.trim();
+        
+        if (!url) {
+            this.showStatus('请输入视频页面链接', 'error');
+            return;
+        }
+
+        try {
+            new URL(url);
+        } catch {
+            this.showStatus('请输入有效的页面链接', 'error');
+            return;
+        }
+
+        this.setParseLoading(true);
+        this.showStatus('正在解析视频页面...', 'info');
+
+        try {
+            const videos = await this.extractVideoUrls(url);
+            
+            if (videos.length > 0) {
+                this.displayVideoResults(videos);
+                this.showStatus(`找到 ${videos.length} 个视频链接`, 'success');
+            } else {
+                this.showStatus('未找到视频链接，请尝试手动输入', 'error');
+            }
+        } catch (error) {
+            console.error('解析失败:', error);
+            this.showStatus(`解析失败: ${error.message}`, 'error');
+        } finally {
+            this.setParseLoading(false);
+        }
+    }
+
+    async extractVideoUrls(pageUrl) {
+        // 方法1: 使用代理服务获取页面内容
+        try {
+            const videos = await this.parseWithProxy(pageUrl);
+            if (videos.length > 0) return videos;
+        } catch (error) {
+            console.log('代理解析失败:', error);
+        }
+
+        // 方法2: 使用iframe方式
+        try {
+            const videos = await this.parseWithIframe(pageUrl);
+            if (videos.length > 0) return videos;
+        } catch (error) {
+            console.log('iframe解析失败:', error);
+        }
+
+        // 方法3: 智能URL匹配
+        return this.smartUrlGuess(pageUrl);
+    }
+
+    async parseWithProxy(pageUrl) {
+        // 使用免费的CORS代理服务
+        const proxyUrls = [
+            `https://api.allorigins.win/get?url=${encodeURIComponent(pageUrl)}`,
+            `https://cors-anywhere.herokuapp.com/${pageUrl}`,
+            `https://thingproxy.freeboard.io/fetch/${pageUrl}`
+        ];
+
+        for (const proxyUrl of proxyUrls) {
+            try {
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                const html = data.contents || data;
+                
+                return this.extractVideoFromHTML(html);
+            } catch (error) {
+                continue;
+            }
+        }
+        
+        throw new Error('所有代理服务都无法访问');
+    }
+
+    async parseWithIframe(pageUrl) {
+        return new Promise((resolve, reject) => {
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = pageUrl;
+            
+            const timeout = setTimeout(() => {
+                document.body.removeChild(iframe);
+                reject(new Error('iframe加载超时'));
+            }, 10000);
+
+            iframe.onload = () => {
+                try {
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                    const html = iframeDoc.documentElement.outerHTML;
+                    const videos = this.extractVideoFromHTML(html);
+                    
+                    clearTimeout(timeout);
+                    document.body.removeChild(iframe);
+                    resolve(videos);
+                } catch (error) {
+                    clearTimeout(timeout);
+                    document.body.removeChild(iframe);
+                    reject(error);
+                }
+            };
+
+            iframe.onerror = () => {
+                clearTimeout(timeout);
+                document.body.removeChild(iframe);
+                reject(new Error('无法加载页面'));
+            };
+
+            document.body.appendChild(iframe);
+        });
+    }
+
+    extractVideoFromHTML(html) {
+        const videos = [];
+        const videoPatterns = [
+            // MP4视频
+            /https?:\/\/[^"\s]+\.mp4[^"\s]*/gi,
+            // M3U8流媒体
+            /https?:\/\/[^"\s]+\.m3u8[^"\s]*/gi,
+            // 其他视频格式
+            /https?:\/\/[^"\s]+\.(avi|mov|wmv|flv|webm|mkv)[^"\s]*/gi,
+            // 视频API接口
+            /https?:\/\/[^"\s]*video[^"\s]*\.(mp4|m3u8)[^"\s]*/gi,
+        ];
+
+        videoPatterns.forEach(pattern => {
+            const matches = html.match(pattern);
+            if (matches) {
+                matches.forEach(url => {
+                    // 清理URL
+                    url = url.replace(/["']/g, '').split('?')[0];
+                    if (!videos.some(v => v.url === url)) {
+                        videos.push({
+                            url: url,
+                            quality: this.guessQuality(url),
+                            size: 'Unknown',
+                            type: this.getVideoType(url)
+                        });
+                    }
+                });
+            }
+        });
+
+        return videos;
+    }
+
+    smartUrlGuess(pageUrl) {
+        const videos = [];
+        const urlObj = new URL(pageUrl);
+        
+        // 常见视频网站的URL模式
+        const patterns = {
+            // 通用模式
+            generic: [
+                `${urlObj.origin}/video/*.mp4`,
+                `${urlObj.origin}/media/*.mp4`,
+                `${urlObj.origin}/stream/*.m3u8`,
+            ]
+        };
+
+        // 基于URL路径猜测可能的视频链接
+        const pathParts = urlObj.pathname.split('/');
+        if (pathParts.length > 1) {
+            const videoId = pathParts[pathParts.length - 1];
+            const possibleUrls = [
+                `${urlObj.origin}/video/${videoId}.mp4`,
+                `${urlObj.origin}/stream/${videoId}.m3u8`,
+                `${urlObj.origin}/media/${videoId}.mp4`,
+                `${urlObj.origin}/download/${videoId}.mp4`,
+            ];
+
+            possibleUrls.forEach(url => {
+                videos.push({
+                    url: url,
+                    quality: 'Unknown',
+                    size: 'Unknown',
+                    type: this.getVideoType(url)
+                });
+            });
+        }
+
+        return videos;
+    }
+
+    guessQuality(url) {
+        if (url.includes('1080')) return '1080p';
+        if (url.includes('720')) return '720p';
+        if (url.includes('480')) return '480p';
+        if (url.includes('360')) return '360p';
+        if (url.includes('hd')) return 'HD';
+        return 'Standard';
+    }
+
+    getVideoType(url) {
+        const extension = url.split('.').pop().toLowerCase();
+        return extension || 'mp4';
+    }
+
+    displayVideoResults(videos) {
+        this.videoList.innerHTML = '';
+        
+        videos.forEach((video, index) => {
+            const videoItem = document.createElement('div');
+            videoItem.className = 'video-item';
+            videoItem.innerHTML = `
+                <div class="video-info">
+                    <span class="video-quality">${video.quality}</span>
+                    <span class="video-size">${video.size}</span>
+                </div>
+                <div class="video-url">${video.url}</div>
+            `;
+
+            videoItem.addEventListener('click', () => {
+                // 移除其他选中状态
+                this.videoList.querySelectorAll('.video-item').forEach(item => {
+                    item.classList.remove('selected');
+                });
+                
+                // 选中当前项
+                videoItem.classList.add('selected');
+                this.selectedVideoUrl = video.url;
+                this.downloadBtn.style.display = 'block';
+            });
+
+            this.videoList.appendChild(videoItem);
+        });
+
+        this.videoResults.style.display = 'block';
+    }
+
+    async handleDownload() {
+        const url = this.selectedVideoUrl || this.manualUrl.value.trim();
+        
+        if (!url) {
+            this.showStatus('请选择或输入视频链接', 'error');
+            return;
+        }
+
+        try {
+            new URL(url);
+        } catch {
+            this.showStatus('请输入有效的链接', 'error');
+            return;
+        }
+
+        this.setDownloadLoading(true);
+        this.showStatus('正在准备下载...', 'info');
+
+        try {
+            await this.downloadVideo(url);
+        } catch (error) {
+            console.error('下载失败:', error);
+            this.showStatus(`下载失败: ${error.message}`, 'error');
+        } finally {
+            this.setDownloadLoading(false);
+        }
+    }
+
+    async downloadVideo(url) {
+        const fileName = this.fileName.value.trim() || this.generateFileName(url);
+        
+        try {
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const contentLength = response.headers.get('content-length');
+            const total = contentLength ? parseInt(contentLength, 10) : 0;
+            
+            this.progressBar.style.display = 'block';
+            this.showStatus('正在下载中...', 'info');
+
+            const reader = response.body.getReader();
+            const chunks = [];
+            let loaded = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+                
+                chunks.push(value);
+                loaded += value.length;
+                
+                if (total > 0) {
+                    const progress = Math.round((loaded / total) * 100);
+                    this.updateProgress(progress);
+                }
+            }
+
+            const blob = new Blob(chunks);
+            const downloadUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            
+            document.body.removeChild(a);
+            URL.revokeObjectURL(downloadUrl);
+            
+            this.showStatus('下载完成！', 'success');
+            this.updateProgress(100);
+            
+        } catch (error) {
+            this.fallbackDownload(url, fileName);
+        }
+    }
+
+    fallbackDownload(url, fileName) {
+        try {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            this.showStatus('已触发下载，请检查浏览器下载列表', 'success');
+        } catch (error) {
+            window.open(url, '_blank');
+            this.showStatus('已在新窗口打开，可右键保存视频', 'info');
+        }
+    }
+
+    generateFileName(url) {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        const segments = pathname.split('/');
+        const lastSegment = segments[segments.length - 1];
+        
+        if (lastSegment && lastSegment.includes('.')) {
+            return lastSegment;
+        }
+        
+        return `video_${Date.now()}.${this.getVideoType(url)}`;
+    }
+
+    setParseLoading(isLoading) {
+        const btnText = this.parseBtn.querySelector('.btn-text');
+        const spinner = this.parseBtn.querySelector('.loading-spinner');
+        
+        this.parseBtn.disabled = isLoading;
+        
+        if (isLoading) {
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline';
+        } else {
+            btnText.style.display = 'inline';
+            spinner.style.display = 'none';
+        }
+    }
+
+    setDownloadLoading(isLoading) {
+        const btnText = this.downloadBtn.querySelector('.btn-text');
+        const spinner = this.downloadBtn.querySelector('.loading-spinner');
+        
+        this.downloadBtn.disabled = isLoading;
+        
+        if (isLoading) {
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline';
+        } else {
+            btnText.style.display = 'inline';
+            spinner.style.display = 'none';
+        }
+    }
+
+    updateProgress(percentage) {
+        this.progressFill.style.width = `${percentage}%`;
+        this.progressText.textContent = `${percentage}%`;
+    }
+
+    showStatus(message, type = 'info') {
+        this.statusMessage.textContent = message;
+        this.statusMessage.className = `status-message ${type}`;
+        
+        if (type === 'success') {
+            setTimeout(() => {
+                this.statusMessage.textContent = '';
+                this.statusMessage.className = 'status-message';
+            }, 5000);
+        }
+    }
+}
+
+// 初始化应用
+document.addEventListener('DOMContentLoaded', () => {
+    new SmartVideoDownloader();
+});
